@@ -1,114 +1,137 @@
 import streamlit as st
 import pandas as pd
-import joblib
 import numpy as np
+import joblib
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Bank Deposit Predictor", page_icon="🏦")
+st.set_page_config(
+    page_title="Bank Marketing Assistant",
+    page_icon="🎯",
+    layout="centered"
+)
 
-# --- LOAD MODEL & SCALER ---
-@st.cache_resource # Caches the model so it doesn't reload on every click
+# --- LOAD ASSETS ---
+@st.cache_resource
 def load_assets():
     try:
         model = joblib.load('bank_model_deploy.pkl')
         scaler = joblib.load('scaler.pkl')
         return model, scaler
     except FileNotFoundError:
-        st.error("Error: Model files not found. Make sure 'bank_model_deploy.pkl' and 'scaler.pkl' are in the same folder.")
-        return None, None
+        st.error("⚠️ Error: Model files not found. Please run your notebook to generate 'bank_model_deploy.pkl'.")
+        st.stop()
+    except Exception as e:
+        st.error(f"⚠️ Error loading model: {e}")
+        st.stop()
 
 model, scaler = load_assets()
 
-# --- TITLE & DESCRIPTION ---
-st.title("🏦 Term Deposit Prediction System")
+# --- HEADER ---
+st.title("🎯 Marketing Campaign Assistant")
 st.markdown("""
-This AI tool predicts whether a bank client will subscribe to a Term Deposit.
-Adjust the sliders below to simulate a customer profile.
+Use this tool to identify **high-potential clients** for the Term Deposit campaign.
+*Adjust the sliders below to match the client's profile.*
 """)
+st.markdown("---")
 
-# --- SIDEBAR INPUTS ---
-st.sidebar.header("Customer Profile")
+# --- INPUTS ---
+st.subheader("👤 Client Profile")
+col1, col2 = st.columns(2)
 
-# 1. Demographics
-st.sidebar.subheader("Demographics")
-age = st.sidebar.slider("Age", 18, 90, 35)
-education_numeric = st.sidebar.selectbox(
-    "Education Level", 
-    options=[0, 1, 2, 3, 4, 5, 6],
-    format_func=lambda x: ["Illiterate", "Basic 4y", "Basic 6y", "Basic 9y", "High School", "Professional", "University"][x],
-    index=6
-)
+with col1:
+    age = st.slider("Age", 18, 90, 35)
 
-# 2. Campaign History
-st.sidebar.subheader("Campaign History")
-campaign = st.sidebar.slider("Number of Contacts (This Campaign)", 1, 20, 2)
-pdays = st.sidebar.number_input("Days since last contact (999=Never)", -1, 999, 999)
-previous = st.sidebar.slider("Previous Contacts", 0, 10, 0)
+with col2:
+    edu_options = {
+        "University Degree": 6,
+        "Professional Course": 5,
+        "High School": 4,
+        "Basic Education (9y)": 3,
+        "Basic Education (6y)": 2,
+        "Basic Education (4y)": 1,
+        "Illiterate": 0
+    }
+    education_label = st.selectbox("Education Level", list(edu_options.keys()))
+    education_numeric = edu_options[education_label]
 
-# 3. Economic Indicators (Macro)
-st.sidebar.subheader("Economic Context")
-emp_rate = st.sidebar.slider("Employment Var. Rate", -4.0, 2.0, -1.8)
-cons_price = st.sidebar.slider("Consumer Price Index", 92.0, 95.0, 93.0)
-cons_conf = st.sidebar.slider("Consumer Conf. Index", -55.0, -25.0, -40.0)
-euribor = st.sidebar.slider("Euribor 3 Month Rate", 0.0, 6.0, 1.2)
-employees = st.sidebar.number_input("Number of Employees", 4900, 5300, 5099)
+st.subheader("📞 Engagement History")
+col3, col4 = st.columns(2)
+
+with col3:
+    campaign = st.slider("Number of Calls (This Campaign)", 1, 10, 2)
+    
+with col4:
+    previous = st.slider("Contacts in Previous Campaigns", 0, 10, 0)
+
+is_new_client = st.checkbox("This is a New Client (Never contacted before)", value=True)
+if is_new_client:
+    pdays = 999
+else:
+    pdays = st.slider("Days since last contact", 0, 500, 30)
+
+st.subheader("📈 Economic Context")
+st.info("Values simulated based on current market data.")
+
+col5, col6 = st.columns(2)
+with col5:
+    euribor = st.slider("Market Interest Rate (Euribor)", 0.0, 5.0, 1.2)
+    emp_rate = st.slider("Economic Stability Index", -3.5, 1.5, -1.8)
+
+with col6:
+    cons_conf = st.slider("Consumer Confidence", -55.0, -25.0, -46.2)
+    cons_idx = 93.5 
+    num_emp = 5100  
 
 # --- PREDICTION LOGIC ---
-if st.button("Predict Subscription Probability", type="primary"):
-    if model is not None:
-        # 1. Organize Inputs exactly like training data
-        input_data = pd.DataFrame({
-            'age': [age],
-            'campaign': [campaign],
-            'pdays': [pdays],
-            'previous': [previous],
-            'employment_variation_rate': [emp_rate],
-            'consumer_price_index': [cons_price],
-            'consumer_confidence_index': [cons_conf],
-            'euribor_3month_rate': [euribor],
-            'num_employees': [employees],
-            'education_numeric': [education_numeric]
-        })
+if st.button("Analyze Client Potential", type="primary", use_container_width=True):
+    
+    input_data = pd.DataFrame({
+        'age': [age],
+        'campaign': [campaign],
+        'pdays': [pdays],
+        'previous': [previous],
+        'employment_variation_rate': [emp_rate],
+        'consumer_price_index': [cons_idx],
+        'consumer_confidence_index': [cons_conf],
+        'euribor_3month_rate': [euribor],
+        'num_employees': [num_emp],
+        'education_numeric': [education_numeric]
+    })
 
-        # 2. SCALE the data (using the saved scaler)
-        # Note: Scaler expects these exact 10 columns in this order
+    try:
         input_scaled = scaler.transform(input_data)
         
-        # 3. FEATURE ENGINEERING (The "Smart" Part)
-        # We need to recreate 'Econ_Pressure' using the SCALED values.
-        # Column Indices: campaign is index 1, euribor is index 7
+        # Manually create interaction term
         scaled_campaign = input_scaled[:, 1]
         scaled_euribor = input_scaled[:, 7]
         econ_pressure = scaled_campaign * scaled_euribor
         
-        # Add this new feature to the array
-        # We assume the model expects 11 features (10 original + 1 interaction)
         final_input = np.column_stack((input_scaled, econ_pressure))
+        
+        try:
+            prob = model.predict_proba(final_input)[0][1]
+        except ValueError:
+            prob = model.predict_proba(input_scaled)[0][1]
 
-        # 4. PREDICT
-        # Use our optimized threshold (0.35)
-        probability = model.predict_proba(final_input)[0][1]
         threshold = 0.35
         
-        # --- DISPLAY RESULTS ---
         st.divider()
-        col1, col2 = st.columns(2)
+        st.progress(int(prob * 100))
         
-        with col1:
-            st.metric("Subscription Probability", f"{probability:.1%}")
+        if prob >= threshold:
+            st.success(f"✅ **HIGH PRIORITY LEAD (Score: {int(prob*100)})**")
+            st.markdown("""
+            **Recommendation:** Call this client immediately.
+            * **Reasoning:** Strong match between client profile and economic climate.
+            """)
+            if econ_pressure[0] > 0.5:
+                st.warning("⚠️ **Note:** Interest rates are high. Mention 'High Return Savings'.")
+                
+        else:
+            st.error(f"❌ **Low Priority (Score: {int(prob*100)})**")
+            st.markdown("""
+            **Recommendation:** Do not call.
+            * **Reasoning:** Conversion probability is too low.
+            """)
             
-        with col2:
-            if probability >= threshold:
-                st.success("Recommendation: **CALL CLIENT**")
-                st.write("This customer has a **High Potential** to subscribe.")
-            else:
-                st.error("Recommendation: **DO NOT CALL**")
-                st.write("Low conversion probability. Save resources.")
-        
-        # Visual Gauge
-        st.progress(int(probability * 100))
-        
-        # Explainability (Why?)
-        st.subheader("Why this prediction?")
-        if econ_pressure[0] > 1.0: # High pressure
-             st.info(f"💡 **Insight:** High 'Economic Pressure' detected (Euribor {euribor} x Calls {campaign}). Customer may be annoyed by persistence in this economy.")
+    except Exception as e:
+        st.error(f"An error occurred during prediction: {e}")
